@@ -6,4 +6,4 @@ compatibility_date = "2025-01-01"
 [[d1_databases]]
 binding = "DB"
 database_name = "gestor_deudas_db"
-database_id = "REEMPLAZA_CON_TU_DATABASE_ID"
+database_id = "c478684a-6c0f-41b0-bd30-cd128b1cbb00"
