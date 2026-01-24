@@ -1,0 +1,15 @@
+{
+  "name": "gestor-deudas",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler pages dev public",
+    "deploy": "wrangler pages deploy public --project-name gestor-de-deudas",
+    "d1:apply:local": "wrangler d1 migrations apply gestor_deudas_db --local",
+    "d1:apply:remote": "wrangler d1 migrations apply gestor_deudas_db --remote",
+    "hash": "node tools/hash_password.mjs"
+  },
+  "devDependencies": {
+    "wrangler": "^3.0.0"
+  }
+}

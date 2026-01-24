@@ -1,0 +1,9 @@
+name = "gestor-de-deudas"
+compatibility_date = "2025-01-01"
+
+# Cloudflare Pages: assets en /public y Functions en /functions
+
+[[d1_databases]]
+binding = "DB"
+database_name = "gestor_deudas_db"
+database_id = "REEMPLAZA_CON_TU_DATABASE_ID"

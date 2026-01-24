@@ -1,0 +1,329 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>GESTOR DE DEUDAS</title>
+  <link rel="stylesheet" href="/styles.css" />
+</head>
+<body>
+  <div class="topbar">
+    <div class="brand">
+      <div class="logo">GD</div>
+      <div>
+        <div class="title">GESTOR DE DEUDAS</div>
+        <div class="subtitle">Cloudflare Pages + Functions + D1</div>
+      </div>
+    </div>
+    <div class="top-actions">
+      <div id="whoami" class="whoami"></div>
+      <button id="btnAdmin" class="btn secondary hidden">Admin</button>
+      <button id="btnLogout" class="btn secondary hidden">Salir</button>
+    </div>
+  </div>
+
+  <main class="container">
+    <!-- LOGIN -->
+    <section id="viewLogin" class="card">
+      <h2>Iniciar sesión</h2>
+      <p class="muted">Usa tu <b>username</b> y <b>password</b>.</p>
+      <form id="loginForm" class="grid2">
+        <label>
+          Usuario
+          <input id="loginUsername" type="text" autocomplete="username" required minlength="3" />
+        </label>
+        <label>
+          Password
+          <input id="loginPassword" type="password" autocomplete="current-password" required minlength="6" />
+        </label>
+        <div class="row">
+          <button class="btn primary" type="submit">Entrar</button>
+          <div id="loginMsg" class="msg"></div>
+        </div>
+      </form>
+
+      <div class="hint">
+        <b>Nota:</b> Si aún no creaste el primer usuario, revisa el README para el “Seed del Admin inicial”.
+      </div>
+    </section>
+
+    <!-- APP -->
+    <section id="viewApp" class="layout hidden">
+      <aside class="sidebar">
+        <div class="sidebar-head">
+          <h3>Cuentas</h3>
+          <button id="btnNewAccount" class="btn small primary">+ Nueva</button>
+        </div>
+        <div id="accountsList" class="list"></div>
+        <div id="accountsEmpty" class="empty hidden">
+          No tienes cuentas todavía. Crea una con “+ Nueva”.
+        </div>
+      </aside>
+
+      <section class="content">
+        <div id="loadingTop" class="loading hidden">Cargando…</div>
+
+        <div class="content-head">
+          <div>
+            <h2 id="accountTitle">Selecciona una cuenta</h2>
+            <div id="accountMeta" class="muted"></div>
+          </div>
+          <div class="row">
+            <button id="btnAccountSettings" class="btn secondary small hidden">Editar cuenta</button>
+          </div>
+        </div>
+
+        <div class="cards">
+          <div class="card mini">
+            <div class="k">Saldo</div>
+            <div id="kSaldo" class="v">—</div>
+          </div>
+          <div class="card mini">
+            <div class="k">Total abonos</div>
+            <div id="kAbonos" class="v">—</div>
+          </div>
+          <div class="card mini">
+            <div class="k">Total cargos</div>
+            <div id="kCargos" class="v">—</div>
+          </div>
+        </div>
+
+        <div id="ownerPanel" class="card hidden">
+          <h3>Registrar movimiento</h3>
+          <form id="txForm" class="grid3">
+            <label>
+              Movimiento
+              <select id="txMovement">
+                <option value="ABONO">ABONO</option>
+                <option value="CARGO">CARGO</option>
+              </select>
+            </label>
+            <label>
+              Fecha
+              <input id="txDate" type="date" required />
+            </label>
+            <label>
+              Monto
+              <input id="txAmount" type="number" step="0.01" min="0.01" required />
+            </label>
+            <label class="span2">
+              Nota
+              <input id="txNote" type="text" maxlength="300" placeholder="Opcional" />
+            </label>
+            <label>
+              Currency
+              <input id="txCurrency" type="text" maxlength="8" placeholder="ej: USD" />
+            </label>
+
+            <div class="row span3">
+              <button class="btn primary" type="submit">Guardar</button>
+              <div id="txMsg" class="msg"></div>
+            </div>
+          </form>
+        </div>
+
+        <div class="card">
+          <div class="row space">
+            <h3>Historial</h3>
+            <div class="row">
+              <button id="btnReload" class="btn secondary small">Recargar</button>
+            </div>
+          </div>
+
+          <div id="txLoading" class="loading hidden">Cargando movimientos…</div>
+
+          <div class="table-wrap">
+            <table class="table">
+              <thead>
+                <tr>
+                  <th>Fecha</th>
+                  <th>Tipo</th>
+                  <th>Monto</th>
+                  <th>Nota</th>
+                  <th>Recibido</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="txBody"></tbody>
+            </table>
+          </div>
+
+          <div id="txEmpty" class="empty hidden">Sin movimientos.</div>
+        </div>
+      </section>
+    </section>
+
+    <!-- MODAL NUEVA CUENTA -->
+    <dialog id="dlgAccount" class="dialog">
+      <form id="accountForm" method="dialog" class="card">
+        <div class="row space">
+          <h3>Nueva cuenta</h3>
+          <button class="btn secondary small" value="cancel">Cerrar</button>
+        </div>
+
+        <div class="grid2">
+          <label>
+            Título
+            <input id="accTitle" required minlength="2" maxlength="80" />
+          </label>
+          <label>
+            Tipo
+            <select id="accKind">
+              <option value="PAYABLE">PAYABLE (lo que debo)</option>
+              <option value="RECEIVABLE">RECEIVABLE (lo que me deben)</option>
+            </select>
+          </label>
+          <label>
+            Currency
+            <input id="accCurrency" required maxlength="8" placeholder="USD" />
+          </label>
+          <label>
+            Monto inicial
+            <input id="accInitial" type="number" step="0.01" min="0" value="0" />
+          </label>
+          <label>
+            Meta semanal (opcional)
+            <input id="accWeekly" type="number" step="0.01" min="0" />
+          </label>
+          <label>
+            Pay To (opcional)
+            <input id="accPayTo" maxlength="80" />
+          </label>
+          <label class="span2">
+            Notes (opcional)
+            <textarea id="accNotes" maxlength="500"></textarea>
+          </label>
+          <label class="span2">
+            Viewer username (opcional)
+            <input id="accViewer" maxlength="40" placeholder="username del VIEWER" />
+          </label>
+
+          <div class="row span2">
+            <button class="btn primary" id="btnCreateAccount" type="submit">Crear</button>
+            <div id="accMsg" class="msg"></div>
+          </div>
+        </div>
+      </form>
+    </dialog>
+
+    <!-- MODAL EDITAR CUENTA -->
+    <dialog id="dlgAccountEdit" class="dialog">
+      <form id="accountEditForm" method="dialog" class="card">
+        <div class="row space">
+          <h3>Editar cuenta</h3>
+          <button class="btn secondary small" value="cancel">Cerrar</button>
+        </div>
+
+        <div class="grid2">
+          <label>
+            Título
+            <input id="eAccTitle" required minlength="2" maxlength="80" />
+          </label>
+          <label>
+            Tipo
+            <select id="eAccKind">
+              <option value="PAYABLE">PAYABLE</option>
+              <option value="RECEIVABLE">RECEIVABLE</option>
+            </select>
+          </label>
+          <label>
+            Currency
+            <input id="eAccCurrency" required maxlength="8" />
+          </label>
+          <label>
+            Meta semanal
+            <input id="eAccWeekly" type="number" step="0.01" min="0" />
+          </label>
+          <label>
+            Pay To
+            <input id="eAccPayTo" maxlength="80" />
+          </label>
+          <label class="span2">
+            Notes
+            <textarea id="eAccNotes" maxlength="500"></textarea>
+          </label>
+          <label class="span2">
+            Viewer username (vacío = quitar)
+            <input id="eAccViewer" maxlength="40" placeholder="username del VIEWER" />
+          </label>
+
+          <div class="row span2">
+            <button class="btn primary" type="submit">Guardar cambios</button>
+            <button id="btnDeleteAccount" class="btn danger" type="button">Eliminar (soft)</button>
+            <div id="eAccMsg" class="msg"></div>
+          </div>
+        </div>
+      </form>
+    </dialog>
+
+    <!-- MODAL ADMIN -->
+    <dialog id="dlgAdmin" class="dialog">
+      <form id="adminForm" method="dialog" class="card">
+        <div class="row space">
+          <h3>Administración</h3>
+          <button class="btn secondary small" value="cancel">Cerrar</button>
+        </div>
+
+        <div class="grid2">
+          <label>
+            Nuevo username
+            <input id="admNewUser" minlength="3" maxlength="40" placeholder="ej: maria" />
+          </label>
+          <label>
+            Rol
+            <select id="admRole">
+              <option value="USER">USER</option>
+              <option value="ADMIN">ADMIN</option>
+            </select>
+          </label>
+          <div class="row span2">
+            <button id="btnCreateUser" class="btn primary" type="button">Crear usuario</button>
+            <div id="admMsg" class="msg"></div>
+          </div>
+        </div>
+
+        <div class="row space" style="margin-top:10px;">
+          <h3>Usuarios</h3>
+          <button id="btnReloadUsers" class="btn secondary small" type="button">Recargar</button>
+        </div>
+
+        <div class="table-wrap">
+          <table class="table">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Username</th>
+                <th>Rol</th>
+                <th>Activo</th>
+                <th>Creado</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody id="admUsersBody"></tbody>
+          </table>
+        </div>
+        <div id="admEmpty" class="empty hidden">No hay usuarios.</div>
+      </form>
+    </dialog>
+
+    <!-- MODAL TEMP PASSWORD -->
+    <dialog id="dlgTempPass" class="dialog">
+      <form method="dialog" class="card">
+        <div class="row space">
+          <h3>Contraseña temporal</h3>
+          <button class="btn secondary small" value="cancel">Cerrar</button>
+        </div>
+        <p class="muted">Cópiala y envíala por un canal seguro. No se mostrará nuevamente.</p>
+        <div class="tempbox">
+          <code id="tempPassValue"></code>
+          <button id="btnCopyTemp" class="btn secondary small" type="button">Copiar</button>
+        </div>
+        <div id="tempMsg" class="msg"></div>
+      </form>
+    </dialog>
+
+  </main>
+
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
