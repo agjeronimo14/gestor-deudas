@@ -28,6 +28,7 @@ export async function onRequest(ctx) {
   try {
     const user = await getAuthUser(ctx);
     if (!user) return withCors(ctx.request, unauthorized("No logueado"));
+    const uid = Number(user.id);
 
     const url = new URL(ctx.request.url);
 
@@ -38,10 +39,10 @@ export async function onRequest(ctx) {
       const limit = Math.min(Number(url.searchParams.get("limit") || 50), 200);
       const offset = Math.max(Number(url.searchParams.get("offset") || 0), 0);
 
-      const acc = await getAccountIfVisible(ctx, user.id, account_id);
+      const acc = await getAccountIfVisible(ctx, uid, account_id);
       if (!acc) return withCors(ctx.request, notFound("Cuenta no visible o no existe"));
 
-      const my_role = acc.owner_user_id === user.id ? "OWNER" : "VIEWER";
+      const my_role = Number(acc.owner_user_id) === uid ? "OWNER" : "VIEWER";
 
       const summary = await one(
         db(ctx)
@@ -111,10 +112,10 @@ export async function onRequest(ctx) {
       const pay_to = optString(body.pay_to, "pay_to", { max: 80 });
       const note = optString(body.note, "note", { max: 300 });
 
-      const acc = await getAccountIfVisible(ctx, user.id, account_id);
+      const acc = await getAccountIfVisible(ctx, uid, account_id);
       if (!acc) return withCors(ctx.request, notFound("Cuenta no existe o no visible"));
 
-      if (acc.owner_user_id !== user.id) return withCors(ctx.request, forbidden("Solo OWNER puede crear movimientos"));
+      if (Number(acc.owner_user_id) !== uid) return withCors(ctx.request, forbidden("Solo OWNER puede crear movimientos"));
 
       const currency = normalizeCurrency(body.currency || acc.currency);
       if (currency !== String(acc.currency).toUpperCase()) {
@@ -131,7 +132,7 @@ export async function onRequest(ctx) {
         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       `
         )
-        .bind(account_id, user.id, movement, date, amount, currency, pay_to, note, receipt_status)
+        .bind(account_id, uid, movement, date, amount, currency, pay_to, note, receipt_status)
         .run();
 
       return withCors(ctx.request, ok({ created: true }));

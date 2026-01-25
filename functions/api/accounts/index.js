@@ -19,6 +19,7 @@ export async function onRequest(ctx) {
   try {
     const user = await getAuthUser(ctx);
     if (!user) return withCors(ctx.request, unauthorized("No logueado"));
+    const uid = Number(user.id);
 
     if (ctx.request.method === "GET") {
       const rows = await all(
@@ -34,13 +35,13 @@ export async function onRequest(ctx) {
           ORDER BY a.created_at DESC, a.id DESC
         `
           )
-          .bind(user.id, user.id)
+          .bind(uid, uid)
       );
 
       const mapped = rows.map((r) => ({
         ...r,
-        my_role: r.owner_user_id === user.id ? "OWNER" : "VIEWER",
-        can_write: r.owner_user_id === user.id
+        my_role: Number(r.owner_user_id) === uid ? "OWNER" : "VIEWER",
+        can_write: Number(r.owner_user_id) === uid
       }));
 
       return withCors(ctx.request, ok({ accounts: mapped }));
@@ -69,8 +70,8 @@ export async function onRequest(ctx) {
             .bind(viewer_username)
         );
         if (!v) return withCors(ctx.request, badRequest("viewer_username no existe"));
-        if (v.id === user.id) return withCors(ctx.request, badRequest("viewer no puede ser el mismo owner"));
-        viewer_user_id = v.id;
+        if (Number(v.id) === uid) return withCors(ctx.request, badRequest("viewer no puede ser el mismo owner"));
+        viewer_user_id = Number(v.id);
       }
 
       await db(ctx)
@@ -80,7 +81,7 @@ export async function onRequest(ctx) {
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
       `
         )
-        .bind(user.id, viewer_user_id, title, kind, currency, initial_amount, weekly_target, pay_to, notes)
+        .bind(uid, viewer_user_id, title, kind, currency, initial_amount, weekly_target, pay_to, notes)
         .run();
 
       return withCors(ctx.request, ok({ created: true }));

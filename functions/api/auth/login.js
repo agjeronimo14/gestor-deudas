@@ -24,19 +24,22 @@ export async function onRequest(ctx) {
         .bind(username)
     );
 
-    if (!user || user.is_active !== 1) return withCors(ctx.request, unauthorized("Credenciales inválidas"));
+    // Nota: D1/SQLite en algunos entornos puede devolver INTEGER como string.
+    // Normalizamos con Number() para evitar falsos 401.
+    if (!user || Number(user.is_active) !== 1) return withCors(ctx.request, unauthorized("Credenciales inválidas"));
 
     const passOk = await verifyPassword(password, user.password_hash);
     if (!passOk) return withCors(ctx.request, unauthorized("Credenciales inválidas"));
 
-    const { sessionId, ttlSeconds } = await createSession(ctx, user.id);
+    const userId = Number(user.id);
+    const { sessionId, ttlSeconds } = await createSession(ctx, userId);
 
     const headers = new Headers();
     headers.append("Set-Cookie", setSessionCookie(ctx.request, sessionId, ttlSeconds));
 
     return withCors(
       ctx.request,
-      ok({ user: { id: user.id, username: user.username, role: user.role } }, { headers })
+      ok({ user: { id: userId, username: user.username, role: user.role } }, { headers })
     );
   } catch (e) {
     console.log("[auth/login]", reqId, e?.message || e);

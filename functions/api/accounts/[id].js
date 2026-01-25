@@ -24,13 +24,14 @@ export async function onRequest(ctx) {
   try {
     const user = await getAuthUser(ctx);
     if (!user) return withCors(ctx.request, unauthorized("No logueado"));
+    const uid = Number(user.id);
 
     const id = getId(ctx);
 
     const acc = await one(db(ctx).prepare("SELECT * FROM accounts WHERE id = ? AND deleted_at IS NULL").bind(id));
     if (!acc) return withCors(ctx.request, notFound("Cuenta no existe"));
 
-    if (acc.owner_user_id !== user.id) return withCors(ctx.request, forbidden("Solo OWNER puede modificar"));
+    if (Number(acc.owner_user_id) !== uid) return withCors(ctx.request, forbidden("Solo OWNER puede modificar"));
 
     if (ctx.request.method === "PUT") {
       const body = await readJson(ctx.request);
@@ -54,8 +55,8 @@ export async function onRequest(ctx) {
             db(ctx).prepare("SELECT id FROM users WHERE username = ? AND is_active=1").bind(viewer_username_raw.toLowerCase())
           );
           if (!v) return withCors(ctx.request, badRequest("viewer_username no existe"));
-          if (v.id === user.id) return withCors(ctx.request, badRequest("viewer no puede ser el mismo owner"));
-          viewer_user_id = v.id;
+          if (Number(v.id) === uid) return withCors(ctx.request, badRequest("viewer no puede ser el mismo owner"));
+          viewer_user_id = Number(v.id);
         }
       }
 

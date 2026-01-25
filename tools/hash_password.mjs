@@ -1,12 +1,11 @@
+// Genera un password_hash compatible con el sistema (Workers/WebCrypto)
+// Formato: pbkdf2$120000$<salt_base64>$<hash_base64>
 // Uso:
-//   npm run hash -- "miPassword"
-// Devuelve el string password_hash compatible con el sistema.
-//
-// Ejemplo:
-//   npm run hash -- "Admin123!"
-//
-// Importante: el resultado es el que debes guardar en users.password_hash.
+//   node tools/hash_password.mjs "Admin123!"
+
 import { webcrypto } from "node:crypto";
+
+const crypto = webcrypto;
 
 function toB64(u8) {
   return Buffer.from(u8).toString("base64");
@@ -14,12 +13,11 @@ function toB64(u8) {
 
 async function hashPassword(password) {
   const salt = new Uint8Array(16);
-  webcrypto.getRandomValues(salt);
-
+  crypto.getRandomValues(salt);
   const iterations = 120000;
   const enc = new TextEncoder();
 
-  const keyMaterial = await webcrypto.subtle.importKey(
+  const key = await crypto.subtle.importKey(
     "raw",
     enc.encode(password),
     "PBKDF2",
@@ -27,9 +25,9 @@ async function hashPassword(password) {
     ["deriveBits"]
   );
 
-  const bits = await webcrypto.subtle.deriveBits(
+  const bits = await crypto.subtle.deriveBits(
     { name: "PBKDF2", hash: "SHA-256", salt, iterations },
-    keyMaterial,
+    key,
     256
   );
 
@@ -39,8 +37,15 @@ async function hashPassword(password) {
 
 const password = process.argv[2];
 if (!password) {
-  console.log('Uso: node tools/hash_password.mjs "TuPassword"');
+  console.error("Uso: node tools/hash_password.mjs <password>");
   process.exit(1);
 }
 
-console.log(await hashPassword(password));
+hashPassword(password)
+  .then((h) => {
+    console.log(h);
+  })
+  .catch((e) => {
+    console.error(e);
+    process.exit(1);
+  });

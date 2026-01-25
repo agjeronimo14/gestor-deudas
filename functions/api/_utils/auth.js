@@ -65,14 +65,16 @@ export async function getAuthUser(ctx) {
     return null;
   }
 
+  const userId = Number(s.user_id);
   const u = await one(
     db(ctx)
       .prepare("SELECT id, username, role, is_active FROM users WHERE id = ?")
-      .bind(s.user_id)
+      .bind(userId)
   );
-  if (!u || u.is_active !== 1) return null;
+  // Normalizamos is_active por consistencia (D1 puede devolver string/number)
+  if (!u || Number(u.is_active) !== 1) return null;
 
-  return { ...u, sessionId };
+  return { ...u, id: Number(u.id), is_active: Number(u.is_active), sessionId };
 }
 
 export function requireAdmin(user) {
