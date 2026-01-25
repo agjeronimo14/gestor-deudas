@@ -13,9 +13,11 @@ export async function onRequest(ctx) {
   try {
     if (ctx.request.method !== "POST") return withCors(ctx.request, badRequest("Método inválido"));
 
-    const setupKey = ctx.env?.SETUP_KEY;
-    const given = ctx.request.headers.get("X-Setup-Key") || "";
-    if (!setupKey || given !== setupKey) return withCors(ctx.request, forbidden("Setup key inválida"));
+    const setupKey = (ctx.env?.SETUP_KEY || "").trim();
+const given = (ctx.request.headers.get("X-Setup-Key") || "").trim();
+if (!setupKey || given !== setupKey) {
+  return withCors(ctx.request, forbidden("Setup key inválida"));
+}
 
     const body = await readJson(ctx.request);
     if (!body) return withCors(ctx.request, badRequest("JSON inválido"));
