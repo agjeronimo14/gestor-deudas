@@ -47,8 +47,27 @@ export async function hashPassword(password) {
 
 export async function verifyPassword(password, hash) {
   try {
-    const [kind, itStr, saltB64, hashB64] = String(hash || "").split("$");
-    if (kind !== "pbkdf2") return false;
+    const raw = String(hash || "").trim();
+
+    // Formatos soportados:
+    // 1) pbkdf2$<it>$<saltB64>$<hashB64>
+    // 2) v1:pbkdf2_sha256:<it>:<saltB64>:<hashB64>
+    let kind, itStr, saltB64, hashB64;
+    if (raw.startsWith("pbkdf2$")) {
+      [kind, itStr, saltB64, hashB64] = raw.split("$");
+    } else if (raw.startsWith("v1:")) {
+      const p = raw.split(":");
+      const algo = String(p[1] || "").toLowerCase();
+      if (!algo.includes("pbkdf2")) return false;
+      kind = "pbkdf2";
+      itStr = p[2];
+      saltB64 = p[3];
+      hashB64 = p[4];
+    } else {
+      return false;
+    }
+
+    if (kind !== "pbkdf2" || !saltB64 || !hashB64) return false;
     const it = Number(itStr || "120000");
     if (!Number.isFinite(it) || it < 10000) return false;
 

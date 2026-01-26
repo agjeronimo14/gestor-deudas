@@ -15,12 +15,23 @@ export async function onRequest(ctx) {
 
     // Trim to avoid hidden whitespace/newlines in env vars or copied headers
     const setupKey = (ctx.env?.SETUP_KEY || "").trim();
-    const given = (ctx.request.headers.get("X-Setup-Key") || "").trim();
-    if (!setupKey) return withCors(ctx.request, forbidden("Setup no configurado"));
-    if (given !== setupKey) return withCors(ctx.request, forbidden("Setup key inválida"));
 
+    // Soportamos el setup key en:
+    // - Header: X-Setup-Key
+    // - Query: ...?setup_key=...
+    // - Body: { setup_key: "..." }
+    const url = new URL(ctx.request.url);
+    const givenHeader = (ctx.request.headers.get("X-Setup-Key") || "").trim();
+    const givenQuery = (url.searchParams.get("setup_key") || url.searchParams.get("key") || "").trim();
+
+    // Leemos JSON (si existe) para permitir setup_key en body
     const body = await readJson(ctx.request);
     if (!body) return withCors(ctx.request, badRequest("JSON inválido"));
+    const givenBody = String(body.setup_key ?? body.setupKey ?? "").trim();
+
+    const given = givenHeader || givenQuery || givenBody;
+    if (!setupKey) return withCors(ctx.request, forbidden("Setup no configurado"));
+    if (!given || given !== setupKey) return withCors(ctx.request, forbidden("Setup key inválida"));
 
     const username = reqString(body.username || "admin", "username", { min: 3, max: 40 }).toLowerCase();
     const password = reqString(body.password, "password", { min: 6, max: 200 });
@@ -29,7 +40,9 @@ export async function onRequest(ctx) {
 
     // Primero intentamos UPDATE (si existe)
     const upd = await db(ctx)
-      .prepare("UPDATE users SET password_hash=?, role='ADMIN', is_active=1, updated_at=datetime('now') WHERE username=?")
+      .prepare(
+        "UPDATE users SET password_hash=?, role='ADMIN', is_active=1, updated_at=datetime('now') WHERE username=? COLLATE NOCASE"
+      )
       .bind(ph, username)
       .run();
 
@@ -44,6 +57,9 @@ export async function onRequest(ctx) {
     return withCors(ctx.request, ok({ username }));
   } catch (e) {
     console.error("[setup/seed-admin] reqId=", reqId, e);
-    return withCors(ctx.request, serverError(`Error en setup (reqId: ${reqId})`));
+    return withCors(
+      ctx.request,
+      serverError("Error en setup", { reqId, details: String(e?.message || e) })
+    );
   }
 }
