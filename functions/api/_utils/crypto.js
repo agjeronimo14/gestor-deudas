@@ -5,6 +5,14 @@
 
 const enc = new TextEncoder();
 
+function getCrypto() {
+  const c = globalThis.crypto;
+  if (!c) throw new Error("crypto no disponible");
+  if (!c.getRandomValues) throw new Error("crypto.getRandomValues no disponible");
+  if (!c.subtle) throw new Error("crypto.subtle no disponible");
+  return c;
+}
+
 function toB64(u8) {
   // Standard base64 (with padding)
   let s = "";
@@ -27,17 +35,20 @@ function toB64Url(u8) {
 }
 
 export async function hashPassword(password) {
-  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const c = getCrypto();
+  const salt = c.getRandomValues(new Uint8Array(16));
   const it = 120000;
-  const key = await crypto.subtle.importKey(
+  const key = await c.subtle.importKey(
     "raw",
     enc.encode(password),
     { name: "PBKDF2" },
     false,
     ["deriveBits"],
   );
-  const bits = await crypto.subtle.deriveBits(
-    { name: "PBKDF2", hash: "SHA-256", salt, iterations: it },
+  // Nota: en algunos runtimes (Pages Functions), `hash` como string puede fallar.
+  // Usamos el objeto `{ name: "SHA-256" }` para máxima compatibilidad.
+  const bits = await c.subtle.deriveBits(
+    { name: "PBKDF2", hash: { name: "SHA-256" }, salt, iterations: it },
     key,
     256,
   );
@@ -47,6 +58,7 @@ export async function hashPassword(password) {
 
 export async function verifyPassword(password, hash) {
   try {
+    const c = getCrypto();
     const raw = String(hash || "").trim();
 
     // Formatos soportados:
@@ -74,7 +86,7 @@ export async function verifyPassword(password, hash) {
     const salt = fromB64(saltB64);
     const expectedHash = fromB64(hashB64);
 
-    const key = await crypto.subtle.importKey(
+    const key = await c.subtle.importKey(
       "raw",
       enc.encode(password),
       { name: "PBKDF2" },
@@ -89,8 +101,8 @@ export async function verifyPassword(password, hash) {
     // try a few common hashes for compatibility.
     const hashesToTry = ["SHA-256", "SHA-512", "SHA-1"];
     for (const h of hashesToTry) {
-      const bits = await crypto.subtle.deriveBits(
-        { name: "PBKDF2", hash: h, salt, iterations: it },
+      const bits = await c.subtle.deriveBits(
+        { name: "PBKDF2", hash: { name: h }, salt, iterations: it },
         key,
         bitsLen,
       );
@@ -109,6 +121,8 @@ export async function verifyPassword(password, hash) {
 }
 
 export function randomToken(bytes = 24) {
-  const u8 = crypto.getRandomValues(new Uint8Array(bytes));
+  const c = globalThis.crypto;
+  if (!c?.getRandomValues) throw new Error("crypto.getRandomValues no disponible");
+  const u8 = c.getRandomValues(new Uint8Array(bytes));
   return toB64Url(u8);
 }
