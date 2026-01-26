@@ -5,12 +5,15 @@ export async function onRequest(ctx) {
   const opt = handleOptions(ctx.request);
   if (opt) return opt;
 
-  const reqId = crypto.randomUUID();
+  const reqId = (globalThis.crypto && crypto.randomUUID) ? crypto.randomUUID() : `req_${Date.now()}`;
   try {
     const hasAtob = typeof atob === "function";
     const hasBtoa = typeof btoa === "function";
     const hasCryptoSubtle = !!(globalThis.crypto && crypto.subtle);
-    const setupKeyPresent = !!(ctx.env?.SETUP_KEY && String(ctx.env.SETUP_KEY).trim().length > 0);
+    const setupKeyStr = String(ctx.env?.SETUP_KEY || "");
+    const setupKeyPresent = setupKeyStr.trim().length > 0;
+    const setupKeyLen = setupKeyStr.length;
+    const hasDBBinding = !!ctx.env?.DB;
 
     const c = await one(db(ctx).prepare("SELECT COUNT(*) as n FROM users"));
     const admin = await one(
@@ -37,6 +40,8 @@ export async function onRequest(ctx) {
       hasBtoa,
       hasCryptoSubtle,
       setupKeyPresent,
+      setupKeyLen,
+      hasDBBinding,
       usersCount: Number(c?.n || 0),
       admin: admin ? {
         id: Number(admin.id),

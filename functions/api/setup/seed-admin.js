@@ -9,7 +9,7 @@ export async function onRequest(ctx) {
   const opt = handleOptions(ctx.request);
   if (opt) return opt;
 
-  const reqId = crypto.randomUUID();
+  const reqId = (globalThis.crypto && crypto.randomUUID) ? crypto.randomUUID() : `setup_${Date.now()}`;
   try {
     if (ctx.request.method !== "POST") return withCors(ctx.request, badRequest("Método inválido"));
 
@@ -57,9 +57,8 @@ export async function onRequest(ctx) {
     return withCors(ctx.request, ok({ username }));
   } catch (e) {
     console.error("[setup/seed-admin] reqId=", reqId, e);
-    return withCors(
-      ctx.request,
-      serverError("Error en setup", { reqId, details: String(e?.message || e) })
-    );
+    // Nota: serverError() no serializa detalles. Dejamos el reqId en el mensaje
+    // para que puedas correlacionar con los logs de Cloudflare.
+    return withCors(ctx.request, serverError(`Error en setup (reqId: ${reqId})`));
   }
 }

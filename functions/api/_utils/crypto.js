@@ -5,6 +5,38 @@
 
 const enc = new TextEncoder();
 
+// Derive PBKDF2 output bytes with maximum compatibility.
+// Some runtimes can reject `deriveBits` even when PBKDF2 is supported.
+// In that case we fall back to `deriveKey` (HMAC) + `exportKey('raw')`.
+async function derivePbkdf2Bytes(c, password, salt, iterations, bitsLen, hashName) {
+  const key = await c.subtle.importKey(
+    "raw",
+    enc.encode(password),
+    { name: "PBKDF2" },
+    false,
+    ["deriveBits", "deriveKey"],
+  );
+
+  const params = { name: "PBKDF2", hash: { name: hashName }, salt, iterations };
+
+  // 1) Preferred: deriveBits
+  try {
+    const bits = await c.subtle.deriveBits(params, key, bitsLen);
+    return new Uint8Array(bits);
+  } catch {
+    // 2) Fallback: deriveKey (HMAC) + export raw
+    const dk = await c.subtle.deriveKey(
+      params,
+      key,
+      { name: "HMAC", hash: { name: hashName }, length: bitsLen },
+      true,
+      ["sign"],
+    );
+    const raw = await c.subtle.exportKey("raw", dk);
+    return new Uint8Array(raw);
+  }
+}
+
 function getCrypto() {
   const c = globalThis.crypto;
   if (!c) throw new Error("crypto no disponible");
@@ -38,21 +70,7 @@ export async function hashPassword(password) {
   const c = getCrypto();
   const salt = c.getRandomValues(new Uint8Array(16));
   const it = 120000;
-  const key = await c.subtle.importKey(
-    "raw",
-    enc.encode(password),
-    { name: "PBKDF2" },
-    false,
-    ["deriveBits"],
-  );
-  // Nota: en algunos runtimes (Pages Functions), `hash` como string puede fallar.
-  // Usamos el objeto `{ name: "SHA-256" }` para máxima compatibilidad.
-  const bits = await c.subtle.deriveBits(
-    { name: "PBKDF2", hash: { name: "SHA-256" }, salt, iterations: it },
-    key,
-    256,
-  );
-  const hash = new Uint8Array(bits);
+  const hash = await derivePbkdf2Bytes(c, password, salt, it, 256, "SHA-256");
   return `pbkdf2$${it}$${toB64(salt)}$${toB64(hash)}`;
 }
 
@@ -86,13 +104,6 @@ export async function verifyPassword(password, hash) {
     const salt = fromB64(saltB64);
     const expectedHash = fromB64(hashB64);
 
-    const key = await c.subtle.importKey(
-      "raw",
-      enc.encode(password),
-      { name: "PBKDF2" },
-      false,
-      ["deriveBits"],
-    );
     // Derive the same number of bits as the stored hash length (supports legacy variations).
     const bitsLen = expectedHash.length * 8;
     if (!Number.isFinite(bitsLen) || bitsLen <= 0) return false;
@@ -101,12 +112,7 @@ export async function verifyPassword(password, hash) {
     // try a few common hashes for compatibility.
     const hashesToTry = ["SHA-256", "SHA-512", "SHA-1"];
     for (const h of hashesToTry) {
-      const bits = await c.subtle.deriveBits(
-        { name: "PBKDF2", hash: { name: h }, salt, iterations: it },
-        key,
-        bitsLen,
-      );
-      const gotHash = new Uint8Array(bits);
+      const gotHash = await derivePbkdf2Bytes(c, password, salt, it, bitsLen, h);
       if (expectedHash.length !== gotHash.length) continue;
 
       // Constant-ish time compare
