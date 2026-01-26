@@ -1,73 +1,57 @@
-import { json, badRequest, unauthorized, serverError } from "../_utils/response.js";
-import { handleOptions, withCors } from "../_utils/auth.js";
-import { db } from "../_utils/db.js";
-import { verifyPassword } from "../_utils/crypto.js";
+import { ok, badRequest, forbidden, serverError } from "../_utils/response";
+import { readJson } from "../_utils/validate";
+import { db, one } from "../_utils/db";
+import { verifyPassword } from "../_utils/crypto";
 
-// Debug endpoint to diagnose auth issues.
-// Protect it with an env var DEBUG_KEY and header X-Debug-Key.
-export async function onRequest(ctx) {
-  const opt = handleOptions(ctx.request);
-  if (opt) return opt;
+function isDebugAllowed(ctx) {
+  const envKey = (ctx.env?.DEBUG_KEY ?? "").toString().trim();
+  if (!envKey) return false;
+  const url = new URL(ctx.request.url);
+  const given = (
+    ctx.request.headers.get("X-Debug-Key") ??
+    url.searchParams.get("debug_key") ??
+    ""
+  ).toString().trim();
+  return !!given && given === envKey;
+}
 
+export async function onRequestPost(ctx) {
   try {
-    const debugKey = String(ctx.env?.DEBUG_KEY || "").trim();
-    if (!debugKey) {
-      return withCors(ctx.request, unauthorized("DEBUG_KEY no configurada"));
-    }
+    if (!isDebugAllowed(ctx)) return forbidden("Debug key requerida");
 
-    const provided = String(ctx.request.headers.get("X-Debug-Key") || "").trim();
-    if (provided !== debugKey) {
-      return withCors(ctx.request, unauthorized("Debug key inválida"));
-    }
+    const body = await readJson(ctx.request);
+    const username = (body.username ?? "").toString().trim().toLowerCase();
+    const password = (body.password ?? "").toString();
+    if (!username) return badRequest("Falta username");
+    if (!password) return badRequest("Falta password");
 
-    let body = null;
-    try {
-      body = await ctx.request.json();
-    } catch {
-      body = null;
-    }
-
-    const username = String(body?.username || "").trim();
-    const password = String(body?.password || "");
-    if (!username || !password) {
-      return withCors(ctx.request, badRequest("username y password requeridos"));
-    }
-
-    const d = db(ctx);
-    const user = await d
-      .prepare("SELECT id, username, role, is_active, password_hash FROM users WHERE username=?")
-      .bind(username.toLowerCase())
-      .first();
+    const d1 = db(ctx);
+    const user = await one(
+      d1.prepare(
+        "SELECT id, username, role, is_active, password_hash FROM users WHERE username=? LIMIT 1"
+      ).bind(username)
+    );
 
     if (!user) {
-      return withCors(ctx.request, json({ ok: true, userFound: false }));
+      return ok({ userFound: false });
     }
 
-    const hash = String(user.password_hash || "");
-    let verifyOk = false;
-    let err = null;
-    try {
-      verifyOk = await verifyPassword(password, hash);
-    } catch (e) {
-      err = String(e?.message || e);
-    }
+    const stored = (user.password_hash ?? user.passwordHash ?? "").toString().trim();
+    const passOk = await verifyPassword(password, stored);
 
-    return withCors(
-      ctx.request,
-      json({
-        ok: true,
-        userFound: true,
-        id: user.id,
-        username: user.username,
-        role: user.role,
-        is_active: user.is_active,
-        hashPrefix: hash.slice(0, 20),
-        hashLen: hash.length,
-        verifyOk,
-        verifyError: err,
-      })
-    );
-  } catch (e) {
-    return withCors(ctx.request, serverError("Error debug auth-check"));
+    return ok({
+      userFound: true,
+      id: user.id,
+      username: user.username,
+      role: user.role,
+      is_active: user.is_active,
+      storedLen: stored.length,
+      storedPrefix: stored.slice(0, 18),
+      storedParts: stored.split("$").length,
+      passOk,
+    });
+  } catch (err) {
+    console.error("debug/auth-check error", err);
+    return serverError("debug/auth-check falló");
   }
 }
