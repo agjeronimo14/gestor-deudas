@@ -1,129 +1,95 @@
-const B64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-const REV = (() => {
-  const a = new Int16Array(256);
-  a.fill(-1);
-  for (let i = 0; i < B64.length; i++) a[B64.charCodeAt(i)] = i;
-  a["-".charCodeAt(0)] = 62; // base64url
-  a["_".charCodeAt(0)] = 63; // base64url
-  return a;
-})();
+// Crypto utils (PBKDF2 password hashing + base64url tokens)
+//
+// Cloudflare Pages/Workers supports atob/btoa.
+// We use them for base64 to avoid padding/decoder bugs that can break auth.
 
-function toB64(bytes) {
-  let out = "";
-  let i = 0;
-  for (; i + 2 < bytes.length; i += 3) {
-    const n = (bytes[i] << 16) | (bytes[i + 1] << 8) | bytes[i + 2];
-    out += B64[(n >> 18) & 63] + B64[(n >> 12) & 63] + B64[(n >> 6) & 63] + B64[n & 63];
-  }
-  const rem = bytes.length - i;
-  if (rem === 1) {
-    const n = bytes[i] << 16;
-    out += B64[(n >> 18) & 63] + B64[(n >> 12) & 63] + "==";
-  } else if (rem === 2) {
-    const n = (bytes[i] << 16) | (bytes[i + 1] << 8);
-    out += B64[(n >> 18) & 63] + B64[(n >> 12) & 63] + B64[(n >> 6) & 63] + "=";
-  }
-  return out;
+const enc = new TextEncoder();
+
+function toB64(u8) {
+  // Standard base64 (with padding)
+  let s = "";
+  for (const b of u8) s += String.fromCharCode(b);
+  return btoa(s);
 }
 
 function fromB64(b64) {
-  // tolerate base64url, whitespace, missing padding
-  let s = String(b64 || "").trim();
-  if (!s) return new Uint8Array();
-  s = s.replace(/\s+/g, "");
-  const pad = s.length % 4;
-  if (pad) s += "=".repeat(4 - pad);
-
-  const out = [];
-  let i = 0;
-  while (i < s.length) {
-    const c1 = REV[s.charCodeAt(i++)];
-    const c2 = REV[s.charCodeAt(i++)];
-    const c3ch = s.charCodeAt(i++);
-    const c4ch = s.charCodeAt(i++);
-
-    if (c1 < 0 || c2 < 0) throw new Error("base64: inválido");
-
-    const c3 = c3ch === 61 ? -2 : REV[c3ch]; // '='
-    const c4 = c4ch === 61 ? -2 : REV[c4ch];
-
-    if (c3 < -1 || c4 < -1) throw new Error("base64: inválido");
-
-    const n = (c1 << 18) | (c2 << 12) | ((c3 > -2 ? c3 : 0) << 6) | (c4 > -2 ? c4 : 0);
-    out.push((n >> 16) & 255);
-    if (c3 !== -2) out.push((n >> 8) & 255);
-    if (c4 !== -2) out.push(n & 255);
-  }
-
-  return new Uint8Array(out);
+  // Accept base64url too and normalize padding
+  const norm = (b64 || "").replace(/-/g, "+").replace(/_/g, "/");
+  const padded = norm.padEnd(Math.ceil(norm.length / 4) * 4, "=");
+  const bin = atob(padded);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
 }
 
-function toB64Url(bytes) {
-  return toB64(bytes).replaceAll("+", "-").replaceAll("/", "_").replaceAll("=", "");
-}
-
-export function randomToken(bytes = 32) {
-  const arr = new Uint8Array(bytes);
-  crypto.getRandomValues(arr);
-  return toB64Url(arr);
+function toB64Url(u8) {
+  return toB64(u8).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
 }
 
 export async function hashPassword(password) {
-  const salt = new Uint8Array(16);
-  crypto.getRandomValues(salt);
-
-  const iterations = 120000;
-  const keyMaterial = await crypto.subtle.importKey(
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const it = 120000;
+  const key = await crypto.subtle.importKey(
     "raw",
-    new TextEncoder().encode(password),
-    "PBKDF2",
+    enc.encode(password),
+    { name: "PBKDF2" },
     false,
-    ["deriveBits"]
+    ["deriveBits"],
   );
-
   const bits = await crypto.subtle.deriveBits(
-    { name: "PBKDF2", hash: "SHA-256", salt, iterations },
-    keyMaterial,
-    256
+    { name: "PBKDF2", hash: "SHA-256", salt, iterations: it },
+    key,
+    256,
   );
-
   const hash = new Uint8Array(bits);
-  return `pbkdf2$${iterations}$${toB64(salt)}$${toB64(hash)}`;
+  return `pbkdf2$${it}$${toB64(salt)}$${toB64(hash)}`;
 }
 
-export async function verifyPassword(password, stored) {
+export async function verifyPassword(password, hash) {
   try {
-    const safe = String(stored || "").trim();
-    const [algo, iterStr, saltB64, hashB64] = safe.split("$");
-    if (algo !== "pbkdf2") return false;
-
-    const iterations = Number(iterStr);
-    if (!Number.isFinite(iterations) || iterations < 10000) return false;
+    const [kind, itStr, saltB64, hashB64] = String(hash || "").split("$");
+    if (kind !== "pbkdf2") return false;
+    const it = Number(itStr || "120000");
+    if (!Number.isFinite(it) || it < 10000) return false;
 
     const salt = fromB64(saltB64);
-    const expected = fromB64(hashB64);
+    const expectedHash = fromB64(hashB64);
 
-    const keyMaterial = await crypto.subtle.importKey(
+    const key = await crypto.subtle.importKey(
       "raw",
-      new TextEncoder().encode(password),
-      "PBKDF2",
+      enc.encode(password),
+      { name: "PBKDF2" },
       false,
-      ["deriveBits"]
+      ["deriveBits"],
     );
+    // Derive the same number of bits as the stored hash length (supports legacy variations).
+    const bitsLen = expectedHash.length * 8;
+    if (!Number.isFinite(bitsLen) || bitsLen <= 0) return false;
 
-    const bits = await crypto.subtle.deriveBits(
-      { name: "PBKDF2", hash: "SHA-256", salt, iterations },
-      keyMaterial,
-      256
-    );
+    // Cloudflare supports PBKDF2 with SHA-256; in case an older deploy used a different hash,
+    // try a few common hashes for compatibility.
+    const hashesToTry = ["SHA-256", "SHA-512", "SHA-1"];
+    for (const h of hashesToTry) {
+      const bits = await crypto.subtle.deriveBits(
+        { name: "PBKDF2", hash: h, salt, iterations: it },
+        key,
+        bitsLen,
+      );
+      const gotHash = new Uint8Array(bits);
+      if (expectedHash.length !== gotHash.length) continue;
 
-    const got = new Uint8Array(bits);
-    if (got.length !== expected.length) return false;
-
-    let diff = 0;
-    for (let i = 0; i < got.length; i++) diff |= got[i] ^ expected[i];
-    return diff === 0;
+      // Constant-ish time compare
+      let diff = 0;
+      for (let i = 0; i < expectedHash.length; i++) diff |= expectedHash[i] ^ gotHash[i];
+      if (diff === 0) return true;
+    }
+    return false;
   } catch {
     return false;
   }
+}
+
+export function randomToken(bytes = 24) {
+  const u8 = crypto.getRandomValues(new Uint8Array(bytes));
+  return toB64Url(u8);
 }

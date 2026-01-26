@@ -13,11 +13,11 @@ export async function onRequest(ctx) {
   try {
     if (ctx.request.method !== "POST") return withCors(ctx.request, badRequest("Método inválido"));
 
+    // Trim to avoid hidden whitespace/newlines in env vars or copied headers
     const setupKey = (ctx.env?.SETUP_KEY || "").trim();
-const given = (ctx.request.headers.get("X-Setup-Key") || "").trim();
-if (!setupKey || given !== setupKey) {
-  return withCors(ctx.request, forbidden("Setup key inválida"));
-}
+    const given = (ctx.request.headers.get("X-Setup-Key") || "").trim();
+    if (!setupKey) return withCors(ctx.request, forbidden("Setup no configurado"));
+    if (given !== setupKey) return withCors(ctx.request, forbidden("Setup key inválida"));
 
     const body = await readJson(ctx.request);
     if (!body) return withCors(ctx.request, badRequest("JSON inválido"));
@@ -43,7 +43,7 @@ if (!setupKey || given !== setupKey) {
 
     return withCors(ctx.request, ok({ username }));
   } catch (e) {
-    console.log("[setup/seed-admin]", reqId, e?.message || e);
-    return withCors(ctx.request, serverError("Error en setup"));
+    console.error("[setup/seed-admin] reqId=", reqId, e);
+    return withCors(ctx.request, serverError(`Error en setup (reqId: ${reqId})`));
   }
 }
