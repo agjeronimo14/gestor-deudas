@@ -1,70 +1,64 @@
-import { ok, badRequest, forbidden, serverError } from "../_utils/response";
-import { readJson } from "../_utils/validate";
-import { db, one } from "../_utils/db";
-import { hashPassword } from "../_utils/crypto";
+import { ok, badRequest, forbidden, serverError, withCors, handleOptions } from "../_utils/response.js";
+import { db } from "../_utils/db.js";
+import { readJson, reqString } from "../_utils/validate.js";
+import { hashPassword } from "../_utils/crypto.js";
 
-function getProvidedKey(req) {
-  const url = new URL(req.url);
-  return (
-    req.headers.get("X-Setup-Key") ??
-    url.searchParams.get("setup_key") ??
-    ""
-  )
-    .toString()
-    .trim();
-}
+// Endpoint de emergencia para sembrar/resetear el admin.
+// Seguridad: requiere header X-Setup-Key que coincida con env.SETUP_KEY.
+export async function onRequest(ctx) {
+  const opt = handleOptions(ctx.request);
+  if (opt) return opt;
 
-function getEnvKey(ctx) {
-  const k = (ctx.env?.SETUP_KEY ?? "").toString().trim();
-  return k || null;
-}
-
-export async function onRequestPost(ctx) {
-  const reqId = (globalThis.crypto?.randomUUID?.() ?? Math.random().toString(16).slice(2));
+  const reqId = (globalThis.crypto && crypto.randomUUID) ? crypto.randomUUID() : `setup_${Date.now()}`;
   try {
-    const envKey = getEnvKey(ctx);
-    if (!envKey) return forbidden("Setup no configurado (falta SETUP_KEY)");
+    if (ctx.request.method !== "POST") return withCors(ctx.request, badRequest("Método inválido"));
 
-    const given = getProvidedKey(ctx.request);
-    if (!given) return forbidden("Setup key requerida");
-    if (given !== envKey) return forbidden("Setup key inválida");
+    // Trim to avoid hidden whitespace/newlines in env vars or copied headers
+    const setupKey = (ctx.env?.SETUP_KEY || "").trim();
 
+    // Soportamos el setup key en:
+    // - Header: X-Setup-Key
+    // - Query: ...?setup_key=...
+    // - Body: { setup_key: "..." }
+    const url = new URL(ctx.request.url);
+    const givenHeader = (ctx.request.headers.get("X-Setup-Key") || "").trim();
+    const givenQuery = (url.searchParams.get("setup_key") || url.searchParams.get("key") || "").trim();
+
+    // Leemos JSON (si existe) para permitir setup_key en body
     const body = await readJson(ctx.request);
-    const username = (body?.username ?? "admin").toString().trim().toLowerCase();
-    const password = (body?.password ?? "Admin123!").toString();
+    if (!body) return withCors(ctx.request, badRequest("JSON inválido"));
+    const givenBody = String(body.setup_key ?? body.setupKey ?? "").trim();
 
-    if (username.length < 3) return badRequest("Username inválido");
-    if (password.length < 6) return badRequest("Password inválida");
+    const given = givenHeader || givenQuery || givenBody;
+    if (!setupKey) return withCors(ctx.request, forbidden("Setup no configurado"));
+    if (!given || given !== setupKey) return withCors(ctx.request, forbidden("Setup key inválida"));
 
-    const password_hash = await hashPassword(password, 120000);
+    const username = reqString(body.username || "admin", "username", { min: 3, max: 40 }).toLowerCase();
+    const password = reqString(body.password, "password", { min: 6, max: 200 });
 
-    const d1 = db(ctx);
-    const existing = await one(
-      d1
-        .prepare("SELECT id, username FROM users WHERE username=? LIMIT 1")
-        .bind(username)
-    );
+    const ph = await hashPassword(password);
 
-    if (existing) {
-      await d1
-        .prepare(
-          "UPDATE users SET password_hash=?, role='ADMIN', is_active=1 WHERE username=?"
-        )
-        .bind(password_hash, username)
-        .run();
-      return ok({ updated: true, username });
-    }
-
-    await d1
+    // Primero intentamos UPDATE (si existe)
+    const upd = await db(ctx)
       .prepare(
-        "INSERT INTO users (username,password_hash,role,is_active) VALUES (?,?, 'ADMIN', 1)"
+        "UPDATE users SET password_hash=?, role='ADMIN', is_active=1, updated_at=datetime('now') WHERE username=? COLLATE NOCASE"
       )
-      .bind(username, password_hash)
+      .bind(ph, username)
       .run();
 
-    return ok({ created: true, username });
-  } catch (err) {
-    console.error("seed-admin error", reqId, err);
-    return serverError(`Error en setup (reqId=${reqId})`);
+    if ((upd?.meta?.changes || 0) === 0) {
+      // Si no existía, insertamos
+      await db(ctx)
+        .prepare("INSERT INTO users (username, password_hash, role, is_active) VALUES (?, ?, 'ADMIN', 1)")
+        .bind(username, ph)
+        .run();
+    }
+
+    return withCors(ctx.request, ok({ username }));
+  } catch (e) {
+    console.error("[setup/seed-admin] reqId=", reqId, e);
+    // Nota: serverError() no serializa detalles. Dejamos el reqId en el mensaje
+    // para que puedas correlacionar con los logs de Cloudflare.
+    return withCors(ctx.request, serverError(`Error en setup (reqId: ${reqId})`));
   }
 }
