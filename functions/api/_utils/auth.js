@@ -1,5 +1,10 @@
 import { db, one } from "./db.js";
 import { randomToken } from "./crypto.js";
+// Algunos endpoints (debug) importaban helpers CORS desde auth.js por error.
+// Para compatibilidad (y evitar fallos de build en Pages), re-exportamos aquí.
+import { handleOptions, withCors } from "./response.js";
+
+export { handleOptions, withCors };
 
 function parseCookies(req) {
   const h = req.headers.get("Cookie") || "";

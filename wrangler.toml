@@ -1,5 +1,8 @@
-name = "gestor-de-deudas"
+name = "gestor-deudas"
 compatibility_date = "2025-01-01"
+
+# Requerido para que Pages lea este archivo como config válida.
+pages_build_output_dir = "public"
 
 # Cloudflare Pages: assets en /public y Functions en /functions
 

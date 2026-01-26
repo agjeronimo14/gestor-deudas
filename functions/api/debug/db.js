@@ -1,5 +1,5 @@
-import { ok, forbidden, serverError } from "../_utils/response";
-import { db, all, one } from "../_utils/db";
+import { ok, forbidden, serverError, handleOptions } from "../_utils/response.js";
+import { db, all, one } from "../_utils/db.js";
 
 function isDebugAllowed(ctx) {
   const envKey = (ctx.env?.DEBUG_KEY ?? "").toString().trim();
@@ -11,6 +11,10 @@ function isDebugAllowed(ctx) {
     ""
   ).toString().trim();
   return !!given && given === envKey;
+}
+
+export async function onRequestOptions(ctx) {
+  return handleOptions(ctx.request);
 }
 
 export async function onRequestGet(ctx) {

@@ -10,18 +10,6 @@ export async function onRequest(ctx) {
 
   const reqId = crypto.randomUUID();
   try {
-    const setupKey = String(ctx.env.SETUP_KEY ?? "").trim();
-    const debugKey = String(ctx.request.headers.get("X-Setup-Key") ?? "").trim();
-    const allowDebug = setupKey && debugKey && debugKey === setupKey;
-
-    const debugUnauthorized = (debug) => {
-      const headers = new Headers({ "Content-Type": "application/json; charset=utf-8" });
-      return new Response(JSON.stringify({ ok: false, error: "Credenciales inválidas", debug }), {
-        status: 401,
-        headers,
-      });
-    };
-
     if (ctx.request.method !== "POST") return withCors(ctx.request, badRequest("Método inválido"));
 
     const body = await readJson(ctx.request);
@@ -32,41 +20,17 @@ export async function onRequest(ctx) {
 
     const user = await one(
       db(ctx)
-        .prepare(
-          "SELECT id, username, password_hash, role, is_active FROM users WHERE username = ? COLLATE NOCASE"
-        )
+        .prepare("SELECT id, username, password_hash, role, is_active FROM users WHERE username = ?")
         .bind(username)
     );
 
     // Nota: D1/SQLite en algunos entornos puede devolver INTEGER como string.
     // Normalizamos con Number() para evitar falsos 401.
-    if (!user) {
-      return withCors(
-        ctx.request,
-        allowDebug ? debugUnauthorized({ reason: "user_not_found", username }) : unauthorized("Credenciales inválidas")
-      );
-    }
+    if (!user || Number(user.is_active) !== 1) return withCors(ctx.request, unauthorized("Credenciales inválidas"));
 
-    if (Number(user.is_active) !== 1) {
-      return withCors(
-        ctx.request,
-        allowDebug
-          ? debugUnauthorized({ reason: "user_inactive", username, is_active: user.is_active, role: user.role })
-          : unauthorized("Credenciales inválidas")
-      );
-    }
-
-    const passOk = await verifyPassword(password, user.password_hash);
-    if (!passOk) {
-      const ph = String(user.password_hash || "");
-      const prefix = ph.slice(0, 32);
-      return withCors(
-        ctx.request,
-        allowDebug
-          ? debugUnauthorized({ reason: "password_mismatch", username, hash_prefix: prefix, hash_len: ph.length })
-          : unauthorized("Credenciales inválidas")
-      );
-    }
+    const stored = (user.password_hash ?? user.passwordHash ?? "").toString().trim();
+    const passOk = await verifyPassword(password, stored);
+    if (!passOk) return withCors(ctx.request, unauthorized("Credenciales inválidas"));
 
     const userId = Number(user.id);
     const { sessionId, ttlSeconds } = await createSession(ctx, userId);
