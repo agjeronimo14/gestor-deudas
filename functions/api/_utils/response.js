@@ -41,7 +41,12 @@ export function withCors(req, res) {
     headers.set("Access-Control-Allow-Credentials", "true");
     headers.set("Vary", "Origin");
   }
-  headers.set("Access-Control-Allow-Headers", "Content-Type");
+  // Permite headers custom (útil para /api/setup y /api/debug)
+  const acrh = req.headers.get("Access-Control-Request-Headers");
+  headers.set(
+    "Access-Control-Allow-Headers",
+    acrh || "Content-Type, X-Setup-Key, X-Debug-Key"
+  );
   headers.set("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
 
   return new Response(res.body, { status: res.status, headers });
