@@ -1,125 +1,55 @@
-# GESTOR DE DEUDAS (Cloudflare Pages + Functions + D1)
+# Gestor de Deudas (Cloudflare Pages + Functions + D1)
 
-Sistema web nuevo y estable con roles simples:
-- **OWNER**: crea y gestiona cuentas y movimientos.
-- **VIEWER**: solo ve cuentas asignadas y puede **confirmar “RECIBIDO”** en abonos PENDIENTE.
-- **ADMIN** (opcional): administra usuarios.
+## Variables/Secrets (MUY IMPORTANTE)
 
-## 1) Requisitos
-- Node.js 18+ (ideal 20+)
-- Wrangler 3.x
+En Cloudflare Pages, ve a:
 
-Instalación:
-```bash
-npm install
+**Workers & Pages → gestor-deudas → Settings → Variables and Secrets**
+
+En el selector de **Environment**, configura *al menos* esto en **Production** (y opcionalmente también en Preview):
+
+- **DEBUG_KEY** (Type: **Secret**) → ejemplo: `alejandro123`
+- **SETUP_KEY** (Type: **Secret**) → ejemplo: `Zuka123456`
+
+> ⚠️ Si tu Dashboard muestra el aviso de que las variables se administran por `wrangler.toml`, entonces **las variables tipo Text del Dashboard NO llegan al runtime**. En ese caso, usa **Secret**.
+
+**Después de cambiar variables/secrets, debes hacer un nuevo deploy** (por ejemplo: "Retry deployment" en Deployments, o un commit vacío y push).
+
+## Endpoints de debug (requieren DEBUG_KEY)
+
+### Ver entorno (sin datos sensibles)
+
+```powershell
+$debug="alejandro123"
+Invoke-RestMethod -Method Get -Uri "https://gestor-deudas.pages.dev/api/debug/env" -Headers @{"X-Debug-Key"=$debug } | ConvertTo-Json -Depth 10
 ```
 
-## 2) Crear la base D1
-1) Crear DB:
-```bash
-npx wrangler d1 create gestor_deudas_db
+### Probar si el password coincide con el hash en D1
+
+POST:
+```powershell
+$debug="alejandro123"
+$body=@{ username="admin"; password="Admin123!" } | ConvertTo-Json
+Invoke-RestMethod -Method Post -Uri "https://gestor-deudas.pages.dev/api/debug/auth-check" -Headers @{"X-Debug-Key"=$debug} -ContentType "application/json" -Body $body | ConvertTo-Json -Depth 10
 ```
 
-2) Copiar el `database_id` que te imprime el comando y pegarlo en `wrangler.toml`:
-```toml
-[[d1_databases]]
-binding = "DB"
-database_name = "gestor_deudas_db"
-database_id = "REEMPLAZA_CON_TU_DATABASE_ID"
+GET (alternativa):
+```powershell
+$debug="alejandro123"
+Invoke-RestMethod -Method Get -Uri "https://gestor-deudas.pages.dev/api/debug/auth-check?username=admin&password=Admin123!" -Headers @{"X-Debug-Key"=$debug} | ConvertTo-Json -Depth 10
 ```
 
-## 3) Migraciones / tablas
-Aplicar migraciones en local:
-```bash
-npm run d1:apply:local
+## Seed del Admin inicial (requiere SETUP_KEY)
+
+```powershell
+$setup="Zuka123456"
+$body=@{ username="admin"; password="Admin123!" } | ConvertTo-Json
+Invoke-RestMethod -Method Post -Uri "https://gestor-deudas.pages.dev/api/setup/seed-admin" -Headers @{"X-Setup-Key"=$setup} -ContentType "application/json" -Body $body | ConvertTo-Json -Depth 10
 ```
 
-Aplicar migraciones en remote (Cloudflare):
-```bash
-npm run d1:apply:remote
+Luego:
+```powershell
+$body=@{ username="admin"; password="Admin123!" } | ConvertTo-Json
+Invoke-RestMethod -Method Post -Uri "https://gestor-deudas.pages.dev/api/auth/login" -ContentType "application/json" -Body $body -SessionVariable s
+Invoke-RestMethod -Method Get -Uri "https://gestor-deudas.pages.dev/api/auth/me" -WebSession $s | ConvertTo-Json -Depth 10
 ```
-
-> Las migraciones están en `migrations/0001_init.sql`.
-
-## 4) Crear usuario ADMIN inicial (seed)
-Como el sistema empieza vacío, crea el primer admin manualmente.
-
-1) Genera el hash de un password:
-```bash
-npm run hash -- "Admin123!"
-```
-Copia el output (algo como `v1:pbkdf2_sha256:...`).
-
-2) Inserta el usuario en D1 remote:
-```bash
-npx wrangler d1 execute gestor_deudas_db --remote --command "INSERT INTO users (username, password_hash, role) VALUES ('admin', '<HASH_AQUI>', 'ADMIN');"
-```
-
-Para local (opcional):
-```bash
-npx wrangler d1 execute gestor_deudas_db --local --command "INSERT INTO users (username, password_hash, role) VALUES ('admin', '<HASH_AQUI>', 'ADMIN');"
-```
-
-## 5) Correr en local
-```bash
-npm run dev
-```
-
-Wrangler levantará Pages con Functions + D1 local. Abre la URL que te indique.
-
-## 6) Deploy a Cloudflare Pages
-
-### Opción A (rápida) – CLI
-```bash
-npm run deploy
-```
-
-### Opción B – GitHub + Pages (recomendado)
-1) Sube el repo a GitHub.
-2) En Cloudflare Pages, conecta el repositorio.
-3) Build settings:
-   - Framework preset: **None**
-   - Build command: *(vacío)*
-   - Output directory: **public**
-4) En **Settings → Functions → D1 Database bindings** agrega:
-   - Variable name: `DB`
-   - Database: `gestor_deudas_db`
-5) Deploy.
-
-## 7) Endpoints principales
-- Auth:
-  - `POST /api/auth/login`
-  - `POST /api/auth/logout`
-  - `GET /api/auth/me`
-
-- Accounts:
-  - `GET /api/accounts`
-  - `POST /api/accounts` (solo OWNER)
-  - `PUT /api/accounts/:id` (solo OWNER)
-  - `DELETE /api/accounts/:id` (soft delete)
-
-- Transactions:
-  - `GET /api/transactions?account_id=...`
-  - `POST /api/transactions` (solo OWNER)
-  - `POST /api/transactions/:id/confirm-receipt` (solo VIEWER asignado)
-
-- Admin (solo ADMIN):
-  - `GET /api/admin/users`
-  - `POST /api/admin/users` (crea user y retorna temp_password)
-  - `POST /api/admin/users/:id/reset-password`
-
-## 8) Checklist de pruebas (OWNER + VIEWER)
-1) Login como `admin`.
-2) En Admin crea dos usuarios: `owner1`, `viewer1`.
-3) Login como `owner1`.
-4) Crear cuenta con viewer `viewer1`.
-5) Registrar ABONO (queda PENDIENTE).
-6) Logout y login como `viewer1`.
-7) Entrar a la cuenta asignada y presionar **Confirmar recibido**.
-8) Volver a `owner1` y validar que el abono quedó **RECIBIDO**.
-
-## Notas de estabilidad
-- Respuestas API consistentes: `{ ok:true, data }` / `{ ok:false, error }`.
-- Validaciones estrictas en confirmación de RECIBIDO.
-- Logs con `reqId` para rastrear errores.
-- Cookies HttpOnly, con `Secure` automático en HTTPS.

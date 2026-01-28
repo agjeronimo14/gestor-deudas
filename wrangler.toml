@@ -1,12 +1,14 @@
 name = "gestor-deudas"
-compatibility_date = "2025-01-01"
+compatibility_date = "2025-08-01"
 
-# Requerido para que Pages lea este archivo como config válida.
-pages_build_output_dir = "public"
-
-# Cloudflare Pages: assets en /public y Functions en /functions
+# For Cloudflare Pages (Functions + static)
+pages_build_output_dir = "./public"
 
 [[d1_databases]]
 binding = "DB"
 database_name = "gestor_deudas_db"
-database_id = "c478684a-6c0f-41b0-bd30-cd128b1cbb00"
+database_id = "" # no es necesario para Pages; el binding se configura en el Dashboard
+
+[[migrations]]
+tag = "v1"
+path = "./migrations/0001_init.sql"
