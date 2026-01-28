@@ -1,14 +1,9 @@
 name = "gestor-deudas"
 compatibility_date = "2025-08-01"
 
-# For Cloudflare Pages (Functions + static)
+# Cloudflare Pages (static + Functions)
 pages_build_output_dir = "./public"
 
-[[d1_databases]]
-binding = "DB"
-database_name = "gestor_deudas_db"
-database_id = "" # no es necesario para Pages; el binding se configura en el Dashboard
-
-[[migrations]]
-tag = "v1"
-path = "./migrations/0001_init.sql"
+# NOTE:
+# - Pages NO soporta `migrations` en wrangler.toml.
+# - Aplica migraciones con Wrangler CLI (d1 migrations/apply) o con d1 execute.
